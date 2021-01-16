@@ -39,6 +39,12 @@ pub trait Map<'a, K: 'a + Eq + Hash, V: 'a, S: 'a + Clone + BuildHasher> {
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized;
 
+    fn _remove_list<'o, I, Q>(&self, keys: I, partition: usize) -> Vec<Option<(K, V)>>
+    where
+        K: Borrow<Q>,
+        Q: 'o + Hash + Eq + ?Sized,
+        I: Iterator<Item = &'o Q>;
+
     fn _iter(&'a self) -> Iter<'a, K, V, S, Self>
     where
         Self: Sized;

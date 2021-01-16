@@ -44,8 +44,16 @@ cfg_if! {
 
 pub(crate) type HashMap<K, V, S> = std::collections::HashMap<K, SharedValue<V>, S>;
 
-fn shard_amount() -> usize {
-    (num_cpus::get() * 4).next_power_of_two()
+cfg_if! {
+    if #[cfg(feature = "raw-api")] {
+        pub fn shard_amount() -> usize {
+            (num_cpus::get() * 4).next_power_of_two()
+        }
+    } else {
+        fn shard_amount() -> usize {
+            (num_cpus::get() * 4).next_power_of_two()
+        }
+    }
 }
 
 fn ncb(shard_amount: usize) -> usize {
@@ -330,6 +338,28 @@ impl<'a, K: 'a + Eq + Hash, V: 'a, S: BuildHasher + Clone> DashMap<K, V, S> {
         Q: Hash + Eq + ?Sized,
     {
         self._remove(key)
+    }
+
+    /// Removes a list of entries from the given shard, returning the keys and values if they existed in the map.
+    ///
+    /// **Locking behaviour:** May deadlock if called when holding any sort of reference into the map.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dashmap::DashMap;
+    ///
+    /// let soccer_team = DashMap::new();
+    /// soccer_team.insert("Jack", "Goalie");
+    /// assert_eq!(soccer_team.remove("Jack").unwrap().1, "Goalie");
+    /// ```
+    pub fn remove_list<'o, I, Q>(&self, keys: I, partition: usize) -> Vec<Option<(K, V)>>
+    where
+        K: Borrow<Q>,
+        Q: 'o + Hash + Eq + ?Sized,
+        I: Iterator<Item = &'o Q>,
+    {
+        self._remove_list(keys, partition)
     }
 
     /// Removes an entry from the map, returning the key and value
@@ -657,6 +687,18 @@ impl<'a, K: 'a + Eq + Hash, V: 'a, S: 'a + BuildHasher + Clone> Map<'a, K, V, S>
         let mut shard = unsafe { self._yield_write_shard(idx) };
 
         shard.remove_entry(key).map(|(k, v)| (k, v.into_inner()))
+    }
+
+    fn _remove_list<'o, I, Q>(&self, keys: I, partition: usize) -> Vec<Option<(K, V)>>
+    where
+        K: Borrow<Q>,
+        Q: 'o + Hash + Eq + ?Sized,
+        I: Iterator<Item = &'o Q>,
+    {
+        let mut shard = unsafe { self._yield_write_shard(partition) };
+
+        keys.map(|v| shard.remove_entry(v).map(|(k, v)| (k, v.into_inner())))
+            .collect()
     }
 
     fn _remove_if<Q>(&self, key: &Q, f: impl FnOnce(&K, &V) -> bool) -> Option<(K, V)>
